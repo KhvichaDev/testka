@@ -1,0 +1,26 @@
+{
+  "name": "hyper-guard-kd",
+  "version": "1.0.0",
+  "description": "Enterprise-grade Offline Sync & Zero-Trust API Security Injector",
+  "main": "index.js",
+  "bin": {
+    "hyper-guard-kd": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "offline-first",
+    "service-worker",
+    "hmac",
+    "security",
+    "zero-trust",
+    "api-protection",
+    "cli"
+  ],
+  "author": "KhvichaDev",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
