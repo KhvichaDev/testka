@@ -5,9 +5,9 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D16.0.0-brightgreen.svg)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-blue.svg)](https://www.npmjs.com/package/hyper-guard-kd)
 
-**A zero-dependency, framework-agnostic CLI that injects Zero-Trust API Security, Offline-First Data Sync, and P2P Swarm Failover into any web project with a single command.**
+**A zero-dependency, framework-agnostic CLI that injects Zero-Trust API Security, Offline-First Data Sync, and an Autonomous P2P Swarm Failover into any web project with a single command.**
 
-Your users lose data when the network drops. Your API is vulnerable to replay attacks. Your server crashes under traffic spikes. **hyper-guard-kd solves all three problems automatically — zero config, zero dependencies, one command.**
+Your users lose data when the network drops. Your API is vulnerable to replay attacks. Your server crashes under traffic spikes. **hyper-guard-kd solves all three problems automatically — zero config, zero dependencies, one command.** Engineered with an elite **"Blind Relay" E2EE Architecture**, ensuring intermediate P2P Swarm Leaders can *never* intercept user data.
 
 ```bash
 npx hyper-guard-kd init
@@ -92,6 +92,7 @@ Every modern web application faces the same trio of invisible threats:
 | **Replay Attack Prevention** | 60-second timestamp window with clock-skew tolerance rejects any replayed or captured request |
 | **Timing-Safe Comparison** | All server-side cryptographic comparisons use constant-time algorithms, eliminating timing side-channel attacks |
 | **Poison Pill Guard** | If the CLI-generated secret key is missing, the server immediately halts — preventing accidental deployment of insecure templates |
+| **Enterprise-Grade Hybrid E2EE (NEW 🚀)** | P2P Swarm payloads are transparently encrypted Client-Side using AES-256-GCM and enveloped via Server RSA-OAEP Public Keys rendering the intermediate Swarm Leaders completely blind |
 
 ### 📡 Layer 2 — Offline-First Data Resilience
 
@@ -102,7 +103,8 @@ Every modern web application faces the same trio of invisible threats:
 | **Paginated Queue Replay** | Queued requests are replayed in batches of 50, preventing memory exhaustion on massive queues (10,000+ items) |
 | **Thundering Herd Prevention** | If the server returns 429/5xx during replay, the queue immediately halts instead of hammering a recovering backend |
 | **Randomized Jitter** | Each request gets 0–500ms of random delay, spreading simultaneous reconnection storms across time |
-| **SHA-256 Deduplication** | Exact cryptographic body hashing prevents double-click duplicate submissions within a 300ms window |
+| **Dual-Layer UI Debouncing 🚀** | Zero-config protection against UI overlapping (e.g. Single vs Double Clicks). Buffers requests by URL for 300ms to eliminate redundant actions, saving massive server IO. |
+| **Cryptographic Anti-Spam 🚀** | Hardcore 1.5s payload deduplicator. Generates an exact SHA-256 digest of the request body to instantly burn rapid stutter-clicks or identical bot spam at the network edge. |
 | **Smart Re-signing** | Replayed requests receive fresh timestamps and signatures, ensuring they pass server validation even after hours in the queue |
 
 ### 🐝 Layer 3 — P2P Swarm Failover Protocol
@@ -111,7 +113,8 @@ Every modern web application faces the same trio of invisible threats:
 |---|---|
 | **WebRTC DataChannel Mesh** | When the server is overwhelmed, browsers automatically form a peer-to-peer network via WebRTC |
 | **Leader Election** | The signaling server elects the most stable peer as the Swarm Leader, who aggregates payloads from all peers |
-| **Batch Aggregation** | The leader collapses potentially thousands of individual requests into a single HTTP batch delivery |
+| **Blind Relay E2EE 🚀** | The Leader acts strictly as a "Blind Relay". It routes payloads but mathematically cannot decrypt the AES-GCM + RSA envelopes. Only your backend can! |
+| **Batch Aggregation** | The Swarm Leader collapses dozens of concurrent requests into a single HTTP batch delivery, completely bypassing standard 429 API limits |
 | **Authorized Command Validation** | Only the cryptographically designated leader can issue BATCH_SUCCESS commands — rogue peers are rejected |
 | **Automatic Peer Cleanup** | Disconnected, failed, or closed WebRTC connections are automatically purged, preventing memory leaks in long sessions |
 | **Graceful Degradation** | If WebRTC is unavailable (older browsers), the system silently falls back to the IndexedDB offline queue |
@@ -143,10 +146,15 @@ The CLI automatically detects your environment:
 
 **Node.js (Express):**
 ```javascript
+// 1. Activate Layer 4 API Security, E2EE, and Rate Limiting
 const validateKhvichaSignature = require('./kd-system/kd-validator');
-
 app.use(validateKhvichaSignature);
+
+// 2. Activate Zero-Dependency P2P WebRTC Signaling Server (Runs silently on port 8080)
+require('./kd-system/kd-signaling');
 ```
+
+> **💡 Zero-Config P2P Swarm:** The client-side `kd-swarm.js` engine automatically detects your production domain to enforce secure `wss://` WebSockets dynamically. You never need to edit or configure the URLs manually!
 
 **WordPress:** No action needed — `mu-plugins` auto-loads.
 
@@ -160,6 +168,7 @@ Add this to your main HTML or JavaScript entry point:
         navigator.serviceWorker.register('/kd-sw-core.js');
     }
 </script>
+<!-- Autonomous WebRTC P2P Engine (Required for Server Failover) -->
 <script src="/kd-swarm.js"></script>
 ```
 
@@ -169,24 +178,59 @@ Add this to your main HTML or JavaScript entry point:
 
 ## 🐝 Swarm Batch Endpoint Templates
 
-When the P2P Swarm Engine delivers aggregated payloads, your server receives them on the `/__kd_swarm_batch` endpoint. Copy the template for your stack:
+The P2P Swarm Engine automatically classifies requests by their target API endpoint. Your server receives **homogeneous batches** — all items in a single delivery belong to the same resource type, enabling true single-query bulk inserts.
+
+**Payload format your server receives:**
+```json
+{
+    "endpoint": "/api/comments",
+    "swarmSize": 100,
+    "batch": [
+        { "url": "...", "method": "POST", "body": "{\"userId\":1,\"postId\":5,\"text\":\"great\"}" },
+        { "url": "...", "method": "POST", "body": "{\"userId\":2,\"postId\":12,\"text\":\"nice\"}" }
+    ]
+}
+```
 
 ### 🟢 Node.js (Express + MySQL / PostgreSQL)
 
 ```javascript
+const validateKhvichaSignature = require('./kd-system/kd-validator');
+
 app.post('/__kd_swarm_batch', async (req, res) => {
-    const swarmBatch = req.body.batch;
+    const { endpoint, batch } = req.body;
 
-    /** Customize these two constants for your database schema. */
-    const TABLE_NAME = "users";
-    const COLUMN_NAME = "email";
-    
-    const values = swarmBatch.map(item => {
-        const originalBody = JSON.parse(item.body);
-        return [originalBody.email]; 
-    });
+    /**
+     * Route each classified batch to the correct database table.
+     * Transparently decrypts Enterprise-Grade Hybrid E2EE payloads 
+     * ensuring intermediate Swarm Leaders cannot intercept data.
+     */
+    if (endpoint === '/api/comments') {
+        const values = batch.map(item => {
+            let data = JSON.parse(item.body);
+            
+            // Unpack E2EE Envelopes gracefully if present
+            if (data._kd_e2ee) {
+                const decryptedData = validateKhvichaSignature.decryptSwarmPayload(data);
+                if (decryptedData) data = decryptedData;
+            }
+            
+            return [data.userId, data.postId, data.text];
+        });
+        await db.query('INSERT INTO comments (user_id, post_id, text) VALUES ?', [values]);
+    }
 
-    await db.query(`INSERT INTO ${TABLE_NAME} (${COLUMN_NAME}) VALUES ?`, [values]);
+    if (endpoint === '/api/register') {
+        const values = batch.map(item => {
+            let data = JSON.parse(item.body);
+            if (data._kd_e2ee) {
+                const decryptedData = validateKhvichaSignature.decryptSwarmPayload(data);
+                if (decryptedData) data = decryptedData;
+            }
+            return [data.email, data.username];
+        });
+        await db.query('INSERT INTO users (email, username) VALUES ?', [values]);
+    }
 
     res.status(200).json({ success: true, message: "Swarm batch saved." });
 });
@@ -199,24 +243,40 @@ add_action('init', function() {
     if ($_SERVER['REQUEST_URI'] === '/__kd_swarm_batch' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         global $wpdb;
         $json = json_decode(file_get_contents('php://input'), true);
+        $endpoint = $json['endpoint'];
         $batch = $json['batch'];
 
-        /** Customize the table name and column for your schema. */
-        $tableName = $wpdb->prefix . "my_custom_table";
-        $placeholders = [];
-        $flat_values = [];
+        /**
+         * Route each classified batch to the correct database table.
+         * Every item in the batch is guaranteed to be the same resource type.
+         */
+        if ($endpoint === '/api/comments') {
+            $placeholders = [];
+            $flat_values = [];
 
-        foreach ($batch as $item) {
-            $body = json_decode($item['body'], true);
-            $placeholders[] = "(%s)";
-            $flat_values[] = $body['email']; 
+            foreach ($batch as $item) {
+                $body = json_decode($item['body'], true);
+                
+                // 🛡️ Blind Relay: Unpack Enterprise-Grade E2EE Envelopes
+                if (isset($body['_kd_e2ee'])) {
+                    // Requires openssl_private_decrypt (RSA-OAEP) & openssl_decrypt (AES-256-GCM)
+                    // See documentation for full PHP kd_decrypt_swarm_payload() implementation
+                    // $body = kd_decrypt_swarm_payload($body);
+                }
+
+                $placeholders[] = "(%d, %d, %s)";
+                $flat_values[] = $body['userId'];
+                $flat_values[] = $body['postId'];
+                $flat_values[] = $body['text'];
+            }
+
+            $tableName = $wpdb->prefix . "comments";
+            $query = $wpdb->prepare(
+                "INSERT INTO $tableName (user_id, post_id, text) VALUES " . implode(',', $placeholders),
+                ...$flat_values
+            );
+            $wpdb->query($query);
         }
-
-        $query = $wpdb->prepare(
-            "INSERT INTO $tableName (email) VALUES " . implode(',', $placeholders),
-            ...$flat_values
-        );
-        $wpdb->query($query);
 
         header('Content-Type: application/json');
         die(json_encode(['success' => true, 'message' => 'Swarm batch saved.']));
@@ -253,17 +313,42 @@ No. The RSA private key is generated with `extractable: false` via the Web Crypt
 | **Hash Function** | SHA-256 |
 | **Certificate Binding** | HMAC-SHA256 (PublicKey \| IP \| UserAgent) |
 | **Replay Window** | 60 seconds (±5s clock skew tolerance) |
-| **Deduplication** | SHA-256 body hash, 300ms window |
+| **Smart API Buffer** | URL+Method based, 300ms override window (Zero-config UI debouncer) |
+| **Hard Anti-Spam Lock** | SHA-256 Cryptographic Body Hash, 1.5s strict lock window |
 | **Queue Batch Size** | 50 items per replay cycle |
 | **Queue Replay Interval** | 1 second between batches |
 | **Load Shedding Threshold (Node.js)** | 70ms event loop lag |
 | **Load Shedding Threshold (PHP)** | 2.5 CPU load average or 200 req/sec |
 | **Swarm Batch Window** | 500ms aggregation delay |
-| **Max Swarm Peers** | 50 concurrent WebRTC connections |
+| **Max Swarm Peers** | 50 concurrent WebRTC connections (= natural batch size cap) |
 | **Dependencies** | 0 |
 | **Minimum Node.js** | v16.0.0 |
 
 ---
+
+## 🌐 Browser Compatibility
+
+The client-side engine requires modern browser APIs. The server-side validator works independently and protects your backend **regardless of the user's browser**.
+
+| Browser | Minimum Version | Year | Full Support |
+|---|---|---|---|
+| Chrome | 40+ | 2015 | ✅ |
+| Firefox | 44+ | 2016 | ✅ |
+| Safari | 11.1+ | 2018 | ✅ |
+| Edge | 17+ | 2018 | ✅ |
+| Internet Explorer | — | — | ❌ |
+
+### What happens on unsupported browsers?
+
+| Layer | Modern Browser | Legacy Browser |
+|---|---|---|
+| **Request Signing (RSA)** | ✅ Automatic | ❌ Skipped |
+| **Offline Queue (IndexedDB)** | ✅ Active | ❌ Unavailable |
+| **P2P Swarm (WebRTC)** | ✅ Active | ❌ Unavailable |
+| **Server Load Shedding** | ✅ Active | ✅ **Active** |
+| **Server crash prevention** | ✅ Protected | ✅ **Protected** |
+
+Legacy browsers lose the client-side resilience features (offline queue, swarm failover), but the server-side load shedding and rate limiting remain fully operational. Your backend will never crash regardless of the client's browser version.
 
 ## 📝 License
 
