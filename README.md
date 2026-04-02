@@ -47,6 +47,7 @@ Every modern web application faces the same trio of invisible threats:
 │                        │  ✦ SHA-256 Request Deduplication         │  │
 │                        │  ✦ Offline Queue (IndexedDB)            │  │
 │                        │  ✦ Paginated Background Sync            │  │
+│                        │  ✦ Dynamic Config (Cache API)            │  │
 │                        └───────────┬─────────────────────────────┘  │
 │                                    │                                │
 │                        ┌───────────▼─────────────────────────────┐  │
@@ -69,9 +70,11 @@ Every modern web application faces the same trio of invisible threats:
 │  │                                                               │  │
 │  │  ✦ RSA Signature Verification                                │  │
 │  │  ✦ HMAC-SHA256 Certificate Binding (IP + UserAgent)          │  │
-│  │  ✦ Replay Attack Prevention (60s timestamp window)           │  │
+│  │  ✦ Replay Attack Prevention (configurable timestamp window)  │  │
 │  │  ✦ Timing-Safe Comparison (anti-timing attack)               │  │
-│  │  ✦ Adaptive Load Shedding (Event Loop / CPU monitoring)      │  │
+│  │  ✦ Smart Sleeper Pressure Sensor (majority-vote state machine│  │
+│  │  ✦ Adaptive Load Shedding (Event Loop / CPU / Rate Limit)    │  │
+│  │  ✦ Centralized Config Service (/__kd_config endpoint)        │  │
 │  │  ✦ Poison Pill Guard (uninitialized key = fatal halt)        │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                                    │                                │
@@ -197,6 +200,7 @@ npx hyper-guard-kd init
 The CLI automatically detects your environment:
 - **Node.js** → Generates `kd-system/kd-validator.js` middleware
 - **PHP** → Generates `kd-system/kd-validator.php` for Laravel/API integration
+- **Both** → Generates `kd-system/kd-config.json` with tunable system parameters
 
 ### Step 2: Wire the Backend
 
@@ -206,11 +210,11 @@ The CLI automatically detects your environment:
 const validateKhvichaSignature = require('./kd-system/kd-validator');
 app.use(validateKhvichaSignature);
 
-// 2. Activate Zero-Dependency P2P WebRTC Signaling Server (Runs silently on port 8080)
+// 2. Activate Zero-Dependency P2P WebRTC Signaling Server (port configurable via kd-config.json)
 require('./kd-system/kd-signaling');
 ```
 
-> **💡 Zero-Config P2P Swarm:** The client-side `kd-swarm.js` engine automatically detects your production domain to enforce secure `wss://` WebSockets dynamically. You never need to edit or configure the URLs manually!
+> **💡 Zero-Config P2P Swarm:** The client-side `kd-swarm.js` engine automatically detects your production domain to enforce secure `wss://` WebSockets dynamically. The signaling port and all system parameters are configurable via `kd-system/kd-config.json`.
 
 **PHP (Laravel / Custom API):**
 Include or require `kd-validator.php` in your API middleware or routing entry point (e.g. `routes/api.php` or `public/index.php`) to intercept and protect incoming API requests cleanly.
