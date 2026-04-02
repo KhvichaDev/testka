@@ -13,6 +13,10 @@ Your users lose data when the network drops. Your API is vulnerable to replay at
 npx hyper-guard-kd init
 ```
 
+> ⚠️ **Architectural Scope & Limitations**
+> Hyper-Guard is purpose-built for modern API architectures (Node.js, Laravel APIs, React, Vue, SPA, Mobile REST, Fetch, Axios, JSON).
+> **It is NOT designed for and DOES NOT support traditional "page-reloading" HTML forms (Browser `navigate` mode).** Due to modern browser security sandboxes, Service Workers cannot securely inject cryptographic headers into traditional navigation requests. Please ensure your core data flows rely on Fetch/XHR APIs before implementing.
+
 ---
 
 ## 🧠 Why This Exists
@@ -106,6 +110,9 @@ Every modern web application faces the same trio of invisible threats:
 | **Dual-Layer UI Debouncing 🚀** | Zero-config protection against UI overlapping (e.g. Single vs Double Clicks). Buffers requests by URL for 300ms to eliminate redundant actions, saving massive server IO. |
 | **Cryptographic Anti-Spam 🚀** | Hardcore 1.5s payload deduplicator. Generates an exact SHA-256 digest of the request body to instantly burn rapid stutter-clicks or identical bot spam at the network edge. |
 | **Smart Re-signing** | Replayed requests receive fresh timestamps and signatures, ensuring they pass server validation even after hours in the queue |
+| **Offline Handshake Fallback** | If cryptographic signing fails due to initial offline status, raw requests are securely vaulted and seamlessly re-certified with fresh RSA keys upon network restoration. |
+| **Zero-Config Auto-Sync** | Universally standardized network restoration trigger. Bypasses unreliable Background Sync APIs to process queues identically across all browsers with strict Concurrency Locks avoiding duplication. |
+| **Session Storage Emulation 🛡️** | Automatically purges the IndexedDB offline queue on 'beforeunload', ensuring stale interrupted payloads never blindly persist across fresh user browser sessions. |
 
 ### 🐝 Layer 3 — P2P Swarm Failover Protocol
 
@@ -115,18 +122,23 @@ Every modern web application faces the same trio of invisible threats:
 | **Leader Election** | The signaling server elects the most stable peer as the Swarm Leader, who aggregates payloads from all peers |
 | **Blind Relay E2EE 🚀** | The Leader acts strictly as a "Blind Relay". It routes payloads but mathematically cannot decrypt the AES-GCM + RSA envelopes. Only your backend can! |
 | **Batch Aggregation** | The Swarm Leader collapses dozens of concurrent requests into a single HTTP batch delivery, completely bypassing standard 429 API limits |
+| **Leader Death Resiliency 🚀**| If the Swarm Leader crashes or disconnects mid-batch, encrypted payloads are securely buffered via Memory Maps and automatically flushed to the newly elected leader. Zero data loss. |
 | **Authorized Command Validation** | Only the cryptographically designated leader can issue BATCH_SUCCESS commands — rogue peers are rejected |
 | **Automatic Peer Cleanup** | Disconnected, failed, or closed WebRTC connections are automatically purged, preventing memory leaks in long sessions |
 | **Graceful Degradation** | If WebRTC is unavailable (older browsers), the system silently falls back to the IndexedDB offline queue |
 
-### ⚡ Layer 4 — Adaptive Load Shedding
+### ⚡ Layer 4 — Adaptive Load Shedding & Smart Pressure Sensor
 
 | Feature | Description |
 |---|---|
-| **Node.js Event Loop Monitor** | A 500ms heartbeat detects event loop lag — when latency exceeds 70ms, all write requests receive instant 429 responses |
-| **PHP CPU Load Detection** | Uses `sys_getloadavg()` with a 2.5 threshold to shed load before the server becomes unresponsive |
-| **PHP Fallback Rate Limiter** | On shared hosting without `sys_getloadavg()`, a file-locked counter caps at 200 req/sec with cryptographically unique lock files |
+| **Node.js Event Loop Monitor** | A 500ms heartbeat detects event loop lag — when latency exceeds the configured threshold, all write requests receive instant 429 responses |
+| **PHP CPU Load Detection** | Uses `sys_getloadavg()` to shed load before the server becomes unresponsive |
+| **PHP Fallback Rate Limiter** | On shared hosting without `sys_getloadavg()`, a file-locked counter caps throughput with cryptographically unique lock files |
+| **Smart Sleeper Pressure Sensor 🚀** | A proactive state machine monitoring request throughput per second. Uses a **majority-vote evaluation** over a configurable observation window (default 10s) to statistically distinguish genuine traffic surges from transient spikes. Near-zero overhead during idle states — the sleeping phase performs a single integer comparison per second |
+| **APCu Zero-I/O Counting (PHP) 🚀** | PHP request counting uses atomic APCu shared memory operations (~0.1μs per request) instead of file I/O, with automatic fallback to `sys_getloadavg()` or file-based rate limiting |
+| **3-Tier PHP Detection** | Cascading detection strategy: **Tier 1** APCu Smart Sleeper → **Tier 2** `sys_getloadavg()` CPU monitoring → **Tier 3** File-based rate limiter. The system always finds a way to protect your server |
 | **Client-Side Circuit Breaker** | 429/5xx responses trigger automatic offline queuing — the user sees instant "saved" feedback, not an error |
+| **Swarm Batch Bypass** | The `/__kd_swarm_batch` endpoint is explicitly excluded from all load-shedding mechanisms, preventing deadlocks where the swarm leader's batch deliveries would be blocked during the exact moments they are needed most |
 
 ---
 
@@ -139,8 +151,8 @@ npx hyper-guard-kd init
 ```
 
 The CLI automatically detects your environment:
-- **WordPress** → Drops `kd-validator.php` into `wp-content/mu-plugins/` (zero-config)
 - **Node.js** → Generates `kd-system/kd-validator.js` middleware
+- **PHP** → Generates `kd-system/kd-validator.php` for Laravel/API integration
 
 ### Step 2: Wire the Backend
 
@@ -156,7 +168,8 @@ require('./kd-system/kd-signaling');
 
 > **💡 Zero-Config P2P Swarm:** The client-side `kd-swarm.js` engine automatically detects your production domain to enforce secure `wss://` WebSockets dynamically. You never need to edit or configure the URLs manually!
 
-**WordPress:** No action needed — `mu-plugins` auto-loads.
+**PHP (Laravel / Custom API):**
+Include or require `kd-validator.php` in your API middleware or routing entry point (e.g. `routes/api.php` or `public/index.php`) to intercept and protect incoming API requests cleanly.
 
 ### Step 3: Register the Service Worker
 
@@ -173,6 +186,89 @@ Add this to your main HTML or JavaScript entry point:
 ```
 
 **That's it.** Your application now has enterprise-grade security, offline resilience, and P2P failover.
+
+---
+
+## ⚙️ Centralized Configuration (kd-config.json)
+
+All system parameters are managed through a single `kd-system/kd-config.json` file generated during `npx hyper-guard-kd init`. Edit this file to tune the system for your specific workload — **no source code modifications required.**
+
+> 💡 **Your custom settings are safe.** Re-running `npx hyper-guard-kd init` will **never** overwrite an existing `kd-config.json`.
+
+### Default Configuration
+
+```json
+{
+    "security": {
+        "maxAgeSeconds": 60
+    },
+    "pressure": {
+        "threshold": 100,
+        "window": 10
+    },
+    "loadShedding": {
+        "eventLoopLagMs": 70,
+        "cpuLoadThreshold": 2.5,
+        "fallbackRateLimit": 200
+    },
+    "offlineQueue": {
+        "bufferMs": 300,
+        "antiSpamMs": 1500,
+        "batchSize": 50,
+        "replayIntervalMs": 1000,
+        "maxJitterMs": 500
+    },
+    "swarm": {
+        "batchDelayMs": 500,
+        "maxPeers": 50,
+        "signalingPort": 8080
+    }
+}
+```
+
+### Parameter Reference
+
+| Section | Parameter | Default | Description |
+|---|---|---|---|
+| `security` | `maxAgeSeconds` | `60` | Replay attack prevention window. Requests older than this many seconds are rejected |
+| `pressure` | `threshold` | `100` | Requests per second before the Smart Sleeper begins evaluating traffic pressure |
+| `pressure` | `window` | `10` | Number of seconds the majority-vote evaluation runs before confirming sustained pressure |
+| `loadShedding` | `eventLoopLagMs` | `70` | Node.js event loop lag threshold in milliseconds. Write requests are shed above this value |
+| `loadShedding` | `cpuLoadThreshold` | `2.5` | PHP `sys_getloadavg()` threshold. Requests are shed when 1-minute CPU load exceeds this |
+| `loadShedding` | `fallbackRateLimit` | `200` | PHP file-based rate limiter cap (requests/second) for shared hosting without APCu or `sys_getloadavg` |
+| `offlineQueue` | `bufferMs` | `300` | Smart URL Buffer debounce window. Duplicate requests to the same URL within this period are collapsed |
+| `offlineQueue` | `antiSpamMs` | `1500` | SHA-256 body hash deduplication window. Identical payloads within this period are rejected |
+| `offlineQueue` | `batchSize` | `50` | Number of queued requests replayed per batch cycle during offline queue recovery |
+| `offlineQueue` | `replayIntervalMs` | `1000` | Delay between consecutive batch replay cycles, preventing event loop blocking |
+| `offlineQueue` | `maxJitterMs` | `500` | Maximum random delay added to outgoing requests, spreading reconnection storms |
+| `swarm` | `batchDelayMs` | `500` | Time the Swarm Leader waits to aggregate peers before delivering a batch |
+| `swarm` | `maxPeers` | `50` | Maximum concurrent WebRTC peer connections accepted by the swarm |
+| `swarm` | `signalingPort` | `8080` | WebSocket port for the zero-dependency P2P signaling server |
+
+### Configuration Priority Chain
+
+The system resolves each parameter using a 3-tier priority:
+
+```
+Environment Variable  →  kd-config.json  →  Factory Default
+      (highest)             (medium)           (lowest)
+```
+
+For example, setting `KD_PRESSURE_THRESHOLD=50` as an environment variable will override the `kd-config.json` value of `100` without touching the file.
+
+### Multi-Tier Caching Architecture
+
+Configuration reading is heavily optimized across all environments:
+
+| Environment | Caching Strategy | Config Overhead Per Request |
+|---|---|---|
+| **Node.js** | Module-level `require()` — config loaded once at startup, held in V8 memory permanently | **0ms** |
+| **PHP (with APCu)** | Parsed config array cached in shared memory with 60-second TTL. File reads reduced from hundreds/second to 1/minute | **~0.001ms** |
+| **PHP (without APCu)** | Direct `file_get_contents()` — the 400-byte config file is served from OS filesystem cache | **~0.015ms** |
+| **Service Worker** | Cache API with stale-while-revalidate pattern. Serves instantly from browser cache, refreshes silently in the background | **0ms** |
+| **Swarm Engine** | Single fetch on page load, config held in-memory JavaScript object for the entire session | **0ms** |
+
+> The `/__kd_config` endpoint serves **only** the client-safe configuration subset (`offlineQueue` + `swarm`). Server-side security thresholds (`pressure`, `loadShedding`, `security`) are **never exposed** to the browser, preventing attackers from probing system limits.
 
 ---
 
@@ -236,51 +332,45 @@ app.post('/__kd_swarm_batch', async (req, res) => {
 });
 ```
 
-### 🔵 PHP (WordPress)
+### 🔵 PHP (Laravel / Custom API)
 
 ```php
-add_action('init', function() {
-    if ($_SERVER['REQUEST_URI'] === '/__kd_swarm_batch' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        global $wpdb;
-        $json = json_decode(file_get_contents('php://input'), true);
-        $endpoint = $json['endpoint'];
-        $batch = $json['batch'];
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
-        /**
-         * Route each classified batch to the correct database table.
-         * Every item in the batch is guaranteed to be the same resource type.
-         */
-        if ($endpoint === '/api/comments') {
-            $placeholders = [];
-            $flat_values = [];
+// In your routes/api.php or dedicated Swarm Controller
+Route::post('/__kd_swarm_batch', function (Request $request) {
+    $endpoint = $request->input('endpoint');
+    $batch = $request->input('batch');
 
-            foreach ($batch as $item) {
-                $body = json_decode($item['body'], true);
-                
-                // 🛡️ Blind Relay: Unpack Enterprise-Grade E2EE Envelopes
-                if (isset($body['_kd_e2ee'])) {
-                    // Requires openssl_private_decrypt (RSA-OAEP) & openssl_decrypt (AES-256-GCM)
-                    // See documentation for full PHP kd_decrypt_swarm_payload() implementation
-                    // $body = kd_decrypt_swarm_payload($body);
-                }
+    /**
+     * Route each classified batch to the correct database table.
+     * Every item in the batch is guaranteed to be the same resource type.
+     */
+    if ($endpoint === '/api/comments') {
+        $insertData = [];
 
-                $placeholders[] = "(%d, %d, %s)";
-                $flat_values[] = $body['userId'];
-                $flat_values[] = $body['postId'];
-                $flat_values[] = $body['text'];
+        foreach ($batch as $item) {
+            $body = json_decode($item['body'], true);
+            
+            // 🛡️ Blind Relay: Unpack Enterprise-Grade E2EE Envelopes
+            if (isset($body['_kd_e2ee'])) {
+                // Requires openssl_private_decrypt (RSA-OAEP) & openssl_decrypt (AES-256-GCM)
+                // See documentation for full PHP kd_decrypt_swarm_payload() implementation
+                // $body = kd_decrypt_swarm_payload($body);
             }
 
-            $tableName = $wpdb->prefix . "comments";
-            $query = $wpdb->prepare(
-                "INSERT INTO $tableName (user_id, post_id, text) VALUES " . implode(',', $placeholders),
-                ...$flat_values
-            );
-            $wpdb->query($query);
+            $insertData[] = [
+                'user_id' => $body['userId'],
+                'post_id' => $body['postId'],
+                'text'    => $body['text']
+            ];
         }
 
-        header('Content-Type: application/json');
-        die(json_encode(['success' => true, 'message' => 'Swarm batch saved.']));
+        DB::table('comments')->insert($insertData);
     }
+
+    return response()->json(['success' => true, 'message' => 'Swarm batch saved.']);
 });
 ```
 
@@ -312,15 +402,20 @@ No. The RSA private key is generated with `extractable: false` via the Web Crypt
 | **Asymmetric Algorithm** | RSASSA-PKCS1-v1_5 (RSA-2048) |
 | **Hash Function** | SHA-256 |
 | **Certificate Binding** | HMAC-SHA256 (PublicKey \| IP \| UserAgent) |
-| **Replay Window** | 60 seconds (±5s clock skew tolerance) |
-| **Smart API Buffer** | URL+Method based, 300ms override window (Zero-config UI debouncer) |
-| **Hard Anti-Spam Lock** | SHA-256 Cryptographic Body Hash, 1.5s strict lock window |
-| **Queue Batch Size** | 50 items per replay cycle |
-| **Queue Replay Interval** | 1 second between batches |
-| **Load Shedding Threshold (Node.js)** | 70ms event loop lag |
-| **Load Shedding Threshold (PHP)** | 2.5 CPU load average or 200 req/sec |
-| **Swarm Batch Window** | 500ms aggregation delay |
-| **Max Swarm Peers** | 50 concurrent WebRTC connections (= natural batch size cap) |
+| **Replay Window** | 60 seconds (configurable via `security.maxAgeSeconds`) |
+| **Smart API Buffer** | URL+Method based, 300ms override window (configurable via `offlineQueue.bufferMs`) |
+| **Hard Anti-Spam Lock** | SHA-256 Cryptographic Body Hash, 1.5s strict lock (configurable via `offlineQueue.antiSpamMs`) |
+| **Queue Batch Size** | 50 items per cycle (configurable via `offlineQueue.batchSize`) |
+| **Queue Replay Interval** | 1 second between batches (configurable via `offlineQueue.replayIntervalMs`) |
+| **Load Shedding Threshold (Node.js)** | 70ms event loop lag (configurable via `loadShedding.eventLoopLagMs`) |
+| **Load Shedding Threshold (PHP)** | 2.5 CPU load average or 200 req/sec (configurable via `loadShedding`) |
+| **Pressure Sensor Threshold** | 100 req/sec with 10s majority-vote window (configurable via `pressure`) |
+| **Swarm Batch Window** | 500ms aggregation delay (configurable via `swarm.batchDelayMs`) |
+| **Max Swarm Peers** | 50 concurrent WebRTC connections (configurable via `swarm.maxPeers`) |
+| **Signaling Server Port** | 8080 (configurable via `swarm.signalingPort`) |
+| **Config Caching (PHP)** | APCu shared memory, 60-second TTL |
+| **Config Caching (Browser)** | Cache API, stale-while-revalidate |
+| **Configuration File** | `kd-system/kd-config.json` (14 parameters, 5 sections) |
 | **Dependencies** | 0 |
 | **Minimum Node.js** | v16.0.0 |
 
