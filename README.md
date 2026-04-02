@@ -134,11 +134,55 @@ Every modern web application faces the same trio of invisible threats:
 | **Node.js Event Loop Monitor** | A 500ms heartbeat detects event loop lag — when latency exceeds the configured threshold, all write requests receive instant 429 responses |
 | **PHP CPU Load Detection** | Uses `sys_getloadavg()` to shed load before the server becomes unresponsive |
 | **PHP Fallback Rate Limiter** | On shared hosting without `sys_getloadavg()`, a file-locked counter caps throughput with cryptographically unique lock files |
-| **Smart Sleeper Pressure Sensor 🚀** | A proactive state machine monitoring request throughput per second. Uses a **majority-vote evaluation** over a configurable observation window (default 10s) to statistically distinguish genuine traffic surges from transient spikes. Near-zero overhead during idle states — the sleeping phase performs a single integer comparison per second |
+| **Smart Sleeper Pressure Sensor 🚀** | A proactive, **cloud-agnostic** state machine monitoring request throughput per second. Traditional load-shedding (CPU/Event Loop) is invisible on auto-scaling platforms like Firebase, Vercel, and AWS because they scale before stress is detectable. The Smart Sleeper solves this by monitoring **request volume** directly — it triggers P2P swarm activation based on traffic patterns, not server health. Uses a **majority-vote evaluation** over a configurable observation window (default 10s) to statistically distinguish genuine surges from transient spikes. Near-zero overhead during idle states |
 | **APCu Zero-I/O Counting (PHP) 🚀** | PHP request counting uses atomic APCu shared memory operations (~0.1μs per request) instead of file I/O, with automatic fallback to `sys_getloadavg()` or file-based rate limiting |
 | **3-Tier PHP Detection** | Cascading detection strategy: **Tier 1** APCu Smart Sleeper → **Tier 2** `sys_getloadavg()` CPU monitoring → **Tier 3** File-based rate limiter. The system always finds a way to protect your server |
 | **Client-Side Circuit Breaker** | 429/5xx responses trigger automatic offline queuing — the user sees instant "saved" feedback, not an error |
 | **Swarm Batch Bypass** | The `/__kd_swarm_batch` endpoint is explicitly excluded from all load-shedding mechanisms, preventing deadlocks where the swarm leader's batch deliveries would be blocked during the exact moments they are needed most |
+
+#### 💤 Smart Sleeper State Machine Lifecycle
+
+The pressure sensor is designed as a **resource-conscious state machine** that stays completely dormant during normal traffic and only activates its evaluation engine when a potential surge is detected:
+
+```
+                    ┌──────────────────────────────────────────┐
+      Normal        │  💤 SLEEPING                             │
+      Traffic       │                                          │
+  ─────────────────▶│  Cost: 1 integer comparison / second     │
+                    │  The counter quietly tracks req/s.       │
+                    │  If count < threshold → stays asleep.    │
+                    └──────────────┬───────────────────────────┘
+                                   │
+                         count >= threshold
+                        (first breach detected!)
+                                   │
+                    ┌──────────────▼───────────────────────────┐
+      Evaluating    │  🔍 EVALUATING (10-second window)        │
+      Window        │                                          │
+  ─────────────────▶│  Each second is classified:              │
+                    │    above threshold  → aboveCount++       │
+                    │    below threshold  → belowCount++       │
+                    │                                          │
+                    │  After 10 seconds:                       │
+                    │    above > below → PRESSURE CONFIRMED    │
+                    │    below >= above → false alarm, sleep   │
+                    └──────────────┬───────────────────────────┘
+                                   │
+                         majority voted "above"
+                                   │
+                    ┌──────────────▼───────────────────────────┐
+      Pressure      │  🔴 PRESSURED                            │
+      Active        │                                          │
+  ─────────────────▶│  All POST/PUT/PATCH/DELETE → 429         │
+                    │  GET requests pass through normally.     │
+                    │  Client SW catches 429 → P2P Swarm ON   │
+                    │                                          │
+                    │  System re-evaluates every 10 seconds.   │
+                    │  Traffic drops → back to 💤 SLEEPING     │
+                    └──────────────────────────────────────────┘
+```
+
+> **Why this matters:** During normal operation (95%+ of the time), the Smart Sleeper consumes virtually **zero CPU** — it performs a single integer comparison once per second. No timers, no polling, no background threads. It only "wakes up" and begins its 10-second evaluation when the first threshold breach is detected, making it **orders of magnitude cheaper** than continuous monitoring solutions.
 
 ---
 
@@ -387,8 +431,11 @@ The CLI detects existing workers (`sw.js`, `service-worker.js`, `firebase-messag
 **Q: What happens if the Swarm signaling server is down?**
 The system gracefully degrades. Requests stay safely in the IndexedDB offline queue and replay automatically when the network stabilizes.
 
-**Q: Does this work with serverless (Vercel, Netlify)?**
+**Q: Does this work with serverless / cloud auto-scaling (Vercel, Firebase, AWS)?**
 The client-side components (Service Worker, Swarm, Offline Queue) work everywhere. The server validator requires a persistent process (Node.js/Express or PHP). For serverless, implement the HMAC validation logic in your edge function.
+
+**Q: How does hyper-guard-kd detect traffic surges on auto-scaling cloud platforms?**
+Traditional load-shedding (CPU monitoring, event loop lag) is invisible on platforms like Firebase and AWS because they auto-scale before stress is detectable — your server never returns 429 or crashes, but your cloud bill skyrockets. The **Smart Sleeper Pressure Sensor** solves this by monitoring **request volume** (req/s) directly through your middleware, not server health metrics. Since every frontend request passes through our validator, we can accurately detect surges regardless of how many cloud instances are running. When sustained pressure is confirmed via majority-vote analysis, P2P swarm batching activates proactively — reducing your server load and cloud costs before they spiral out of control.
 
 **Q: Is the private key exposed to JavaScript?**
 No. The RSA private key is generated with `extractable: false` via the Web Crypto API. It exists only inside the browser's cryptographic module and cannot be read, copied, or exported by any JavaScript code — including your own.
